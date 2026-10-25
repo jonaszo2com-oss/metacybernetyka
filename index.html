@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pl">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Metacybernetyka</title>
+<style>
+body{font:16px system-ui;margin:16px;background:#f7f7f5;color:#222}
+button,input,select{padding:10px;margin:3px;border:1px solid #ccc;border-radius:8px}
+svg{width:100%;background:white;border:1px solid #ddd;border-radius:12px;margin-top:12px}
+</style>
+<h2>Metacybernetyka</h2>
+<p>Dodaj element i buduj własną strukturę.</p>
+<input id="id" value="0a" aria-label="Identyfikator">
+<select id="type" aria-label="Typ elementu">
+<option value="square">Kwadrat</option>
+<option value="dot">Punkt</option>
+<option value="circle">Okrąg</option>
+<option value="line">Linia</option>
+</select>
+<button onclick="add()">Dodaj</button>
+<button onclick="toggle()">Ukryj/pokaż</button>
+<button onclick="combine()">Połącz → 1a</button>
+<svg id="view" viewBox="0 0 340 300"></svg>
+<p id="status">Gotowe.</p>
+<button onclick="save()">Eksportuj dane JSON</button>
+<script>
+const ns="http://www.w3.org/2000/svg";
+let items=[
+{id:"0a",type:"square",x:30,y:35,layer:0},
+{id:"0b",type:"square",x:90,y:90,layer:0},
+{id:"r1",type:"dot",x:140,y:130,layer:0}
+],hidden=false;
+function draw(){
+let s=document.getElementById("view");s.replaceChildren();
+items.filter(a=>!hidden||a.layer!==0).forEach(a=>{
+let g=document.createElementNS(ns,"g");
+let sh=document.createElementNS(ns,
+a.type==="square"?"rect":a.type==="line"?"line":"circle");
+if(a.type==="square")Object.entries({x:a.x,y:a.y,width:150,height:120}).forEach(([k,v])=>sh.setAttribute(k,v));
+else if(a.type==="line")Object.entries({x1:a.x,y1:a.y,x2:a.x+75,y2:a.y+35}).forEach(([k,v])=>sh.setAttribute(k,v));
+else Object.entries({cx:a.x,cy:a.y,r:a.type==="dot"?5:30}).forEach(([k,v])=>sh.setAttribute(k,v));
+sh.setAttribute("fill","none");sh.setAttribute("stroke","#222");
+sh.setAttribute("stroke-width","2");g.append(sh);
+let t=document.createElementNS(ns,"text");
+t.setAttribute("x",a.x);t.setAttribute("y",Math.max(14,a.y-7));t.textContent=a.id;
+g.append(t);s.append(g);
+});}
+function add(){
+let id=document.getElementById("id").value.trim();
+if(!id||items.some(a=>a.id===id)){alert("Podaj nowy, unikalny identyfikator.");return}
+let type=document.getElementById("type").value;
+items.push({id,type,x:35+(items.length*29)%250,y:45+(items.length*37)%220,layer:0});
+draw();document.getElementById("status").textContent="Dodano "+id;
+}
+function toggle(){hidden=!hidden;draw();document.getElementById("status").textContent=hidden?"Warstwa bazowa ukryta.":"Warstwa bazowa widoczna."}
+function combine(){
+let src=items.filter(a=>a.layer===0);
+if(src.length<2)return;
+src.forEach(a=>a.layer=1);
+items.push({id:"1a",type:"dot",x:170,y:150,layer:0,sources:src.map(a=>a.id)});
+hidden=false;draw();
+document.getElementById("status").textContent="Utworzono 1a; źródła zachowano w ukrytej warstwie.";
+}
+function save(){
+let b=new Blob([JSON.stringify(items,null,2)],{type:"application/json"});
+let a=document.createElement("a");a.href=URL.createObjectURL(b);
+a.download="metacybernetyka.json";a.click();
+URL.revokeObjectURL(a.href);
+}
+draw();
+</script>
+</html>
