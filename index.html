@@ -1,72 +1,124 @@
-<!doctype html>
+
+<!DOCTYPE html>
 <html lang="pl">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Metacybernetyka</title>
 <style>
-body{font:16px system-ui;margin:16px;background:#f7f7f5;color:#222}
-button,input,select{padding:10px;margin:3px;border:1px solid #ccc;border-radius:8px}
-svg{width:100%;background:white;border:1px solid #ddd;border-radius:12px;margin-top:12px}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f4f5f7;color:#20242b}
+header{padding:16px;background:#202b3c;color:white}
+h2{margin:0;font-size:22px}
+p{font-size:14px}
+.tools{display:flex;flex-wrap:wrap;gap:8px;padding:12px}
+button{padding:12px;border:1px solid #aab2bf;border-radius:9px;background:white;font-size:15px}
+button:active{background:#dce8ff}
+#board{margin:0 10px;background:white;border:1px solid #ccd2db;border-radius:10px;overflow:hidden}
+svg{width:100%;height:58vh;min-height:320px;touch-action:none;display:block}
+.item{cursor:grab}
+.item:active{cursor:grabbing}
+.shape{fill:#fff;stroke:#25364d;stroke-width:2.5}
+.dot{fill:#25364d}
+.label{font-size:14px;fill:#20242b;pointer-events:none}
+footer{padding:10px;font-size:13px;color:#555}
 </style>
+</head>
+<body>
+<header>
 <h2>Metacybernetyka</h2>
-<p>Dodaj element i buduj własną strukturę.</p>
-<input id="id" value="0a" aria-label="Identyfikator">
-<select id="type" aria-label="Typ elementu">
-<option value="square">Kwadrat</option>
-<option value="dot">Punkt</option>
-<option value="circle">Okrąg</option>
-<option value="line">Linia</option>
-</select>
-<button onclick="add()">Dodaj</button>
-<button onclick="toggle()">Ukryj/pokaż</button>
-<button onclick="combine()">Połącz → 1a</button>
-<svg id="view" viewBox="0 0 340 300"></svg>
-<p id="status">Gotowe.</p>
-<button onclick="save()">Eksportuj dane JSON</button>
+<p>Dotknij elementu i przeciągnij go palcem.</p>
+</header>
+<div class="tools">
+<button onclick="add('square')">＋ Kwadrat</button>
+<button onclick="add('dot')">＋ Punkt r</button>
+<button onclick="add('circle')">＋ Okrąg</button>
+<button onclick="add('line')">＋ Linia</button>
+<button onclick="undo()">Cofnij dodanie</button>
+</div>
+<div id="board">
+<svg id="scene" viewBox="0 0 360 500" aria-label="Plansza metacybernetyki">
+<g id="items"></g>
+</svg>
+</div>
+<footer id="status">Warstwa: 0a · Elementy można przesuwać.</footer>
 <script>
-const ns="http://www.w3.org/2000/svg";
-let items=[
-{id:"0a",type:"square",x:30,y:35,layer:0},
-{id:"0b",type:"square",x:90,y:90,layer:0},
-{id:"r1",type:"dot",x:140,y:130,layer:0}
-],hidden=false;
-function draw(){
-let s=document.getElementById("view");s.replaceChildren();
-items.filter(a=>!hidden||a.layer!==0).forEach(a=>{
-let g=document.createElementNS(ns,"g");
-let sh=document.createElementNS(ns,
-a.type==="square"?"rect":a.type==="line"?"line":"circle");
-if(a.type==="square")Object.entries({x:a.x,y:a.y,width:150,height:120}).forEach(([k,v])=>sh.setAttribute(k,v));
-else if(a.type==="line")Object.entries({x1:a.x,y1:a.y,x2:a.x+75,y2:a.y+35}).forEach(([k,v])=>sh.setAttribute(k,v));
-else Object.entries({cx:a.x,cy:a.y,r:a.type==="dot"?5:30}).forEach(([k,v])=>sh.setAttribute(k,v));
-sh.setAttribute("fill","none");sh.setAttribute("stroke","#222");
-sh.setAttribute("stroke-width","2");g.append(sh);
-let t=document.createElementNS(ns,"text");
-t.setAttribute("x",a.x);t.setAttribute("y",Math.max(14,a.y-7));t.textContent=a.id;
-g.append(t);s.append(g);
-});}
-function add(){
-let id=document.getElementById("id").value.trim();
-if(!id||items.some(a=>a.id===id)){alert("Podaj nowy, unikalny identyfikator.");return}
-let type=document.getElementById("type").value;
-items.push({id,type,x:35+(items.length*29)%250,y:45+(items.length*37)%220,layer:0});
-draw();document.getElementById("status").textContent="Dodano "+id;
+const svg=document.getElementById('scene');
+const layer=document.getElementById('items');
+let count=0, selected=null, drag=null;
+const NS='http://www.w3.org/2000/svg';
+
+function el(tag,attrs={}){
+ const n=document.createElementNS(NS,tag);
+ for(const k in attrs)n.setAttribute(k,attrs[k]);
+ return n;
 }
-function toggle(){hidden=!hidden;draw();document.getElementById("status").textContent=hidden?"Warstwa bazowa ukryta.":"Warstwa bazowa widoczna."}
-function combine(){
-let src=items.filter(a=>a.layer===0);
-if(src.length<2)return;
-src.forEach(a=>a.layer=1);
-items.push({id:"1a",type:"dot",x:170,y:150,layer:0,sources:src.map(a=>a.id)});
-hidden=false;draw();
-document.getElementById("status").textContent="Utworzono 1a; źródła zachowano w ukrytej warstwie.";
+function add(type){
+ count++;
+ const id=type==='square'?(count===1?'0a':'0b'):
+ type==='dot'?'r'+count:
+ type==='circle'?'o'+count:'k'+count;
+ const g=el('g',{class:'item', 'data-id':id,
+ transform:`translate(${65+(count%3)*65} ${75+(count%5)*65})`});
+ let shape;
+ if(type==='square'){
+  shape=el('rect',{x:0,y:0,width:65,height:65,class:'shape'});
+ }else if(type==='dot'){
+  shape=el('circle',{cx:0,cy:0,r:6,class:'dot'});
+ }else if(type==='circle'){
+  shape=el('circle',{cx:0,cy:0,r:30,class:'shape',fill:'none'});
+ }else{
+  shape=el('line',{x1:-28,y1:0,x2:28,y2:0,stroke:'#25364d','stroke-width':3});
+ }
+ g.appendChild(shape);
+ const label=el('text',{x:type==='dot'?10:0,y:type==='dot'?-12:-7,class:'label'});
+ label.textContent=id;
+ g.appendChild(label);
+ g.addEventListener('pointerdown',startDrag);
+ g.addEventListener('click',()=>select(g));
+ layer.appendChild(g);
+ select(g);
+ document.getElementById('status').textContent='Dodano '+id+'. Przesuń go palcem.';
 }
-function save(){
-let b=new Blob([JSON.stringify(items,null,2)],{type:"application/json"});
-let a=document.createElement("a");a.href=URL.createObjectURL(b);
-a.download="metacybernetyka.json";a.click();
-URL.revokeObjectURL(a.href);
+function select(g){
+ if(selected)selected.querySelector('.shape')?.setAttribute('stroke','#25364d');
+ selected=g;
+ const s=g.querySelector('.shape');
+ if(s)s.setAttribute('stroke','#1874d1');
+ document.getElementById('status').textContent='Zaznaczono '+g.dataset.id+'.';
 }
-draw();
+function startDrag(e){
+ e.preventDefault();
+ e.stopPropagation();
+ const g=e.currentTarget;
+ select(g);
+ const p=point(e);
+ const t=g.transform.baseVal.consolidate();
+ const m=t?t.matrix:{e:0,f:0};
+ drag={g,dx:p.x-m.e,dy:p.y-m.f};
+ g.setPointerCapture(e.pointerId);
+}
+function point(e){
+ const p=svg.createSVGPoint();
+ p.x=e.clientX;p.y=e.clientY;
+ return p.matrixTransform(svg.getScreenCTM().inverse());
+}
+svg.addEventListener('pointermove',e=>{
+ if(!drag)return;
+ const p=point(e);
+ drag.g.setAttribute('transform',
+ `translate(${p.x-drag.dx} ${p.y-drag.dy})`);
+});
+function stopDrag(){drag=null}
+svg.addEventListener('pointerup',stopDrag);
+svg.addEventListener('pointercancel',stopDrag);
+function undo(){
+ if(!layer.lastElementChild)return;
+ const gone=layer.lastElementChild.dataset.id;
+ layer.lastElementChild.remove();
+ if(selected?.dataset.id===gone)selected=null;
+ document.getElementById('status').textContent='Usunięto ostatnio dodany element.';
+}
 </script>
+</body>
 </html>
