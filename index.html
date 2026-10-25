@@ -7,27 +7,28 @@
 <title>Metacybernetyka</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#f3f5f8;color:#202938;font-family:Arial,sans-serif}
-header{background:#202b3c;color:white;padding:16px}
-h2{margin:0}
-header p{margin-bottom:0;font-size:14px}
-.panel{padding:10px;display:flex;flex-wrap:wrap;gap:7px}
-button{padding:11px 12px;background:white;border:1px solid #bbc4d0;border-radius:9px;font-size:14px}
-button:active{background:#dce9ff}
-.action{background:#e5edff;border-color:#829ed0}
-#board{margin:0 8px;background:white;border:1px solid #ccd3dd;border-radius:10px;overflow:hidden}
-svg{display:block;width:100%;height:55vh;min-height:330px;touch-action:none}
-.item{cursor:grab;touch-action:none}
-.shape{fill:white;stroke:#26364c;stroke-width:2}
-.label{font-size:14px;fill:#202938;pointer-events:none}
+body{margin:0;font-family:Arial,sans-serif;background:#f2f4f7;color:#202b3c}
+header{background:#202b3c;color:white;padding:15px}
+h2{margin:0;font-size:22px}
+header p{font-size:14px;margin-bottom:0}
+.panel{display:flex;flex-wrap:wrap;gap:7px;padding:9px}
+button,.filebtn{border:1px solid #bdc6d2;background:white;border-radius:9px;padding:11px;font-size:14px;color:#202b3c}
+.action{background:#e4ecff}
+button:active{background:#d4e2fc}
+#board{margin:0 8px;border:1px solid #cbd3de;border-radius:10px;background:white;overflow:hidden}
+svg{display:block;width:100%;height:53vh;min-height:320px;touch-action:none}
+.label{font-size:14px;fill:#202b3c;pointer-events:none}
+.item{touch-action:none}
 #status{padding:10px;font-size:13px;min-height:38px}
-small{display:block;padding:0 12px 10px;color:#596579}
+#history{padding:10px;margin:0 8px 10px;background:white;border:1px solid #d2d8e1;border-radius:9px;font-size:13px}
+.hidden{display:none!important}
+input[type=file]{display:none}
 </style>
 </head>
 <body>
 <header>
 <h2>Metacybernetyka</h2>
-<p>Dodawaj, zaznaczaj i przesuwaj elementy palcem.</p>
+<p>Automatyczny zapis · historia · przywracanie źródeł</p>
 </header>
 
 <div class="panel">
@@ -41,8 +42,15 @@ small{display:block;padding:0 12px 10px;color:#596579}
 <div class="panel">
 <button class="action" onclick="transform()">0a + 0b = 1a</button>
 <button class="action" onclick="makeMeta()">Utwórz m0a</button>
-<button onclick="showAll()">Pokaż historię</button>
-<button onclick="exportData()">Eksport JSON</button>
+<button onclick="restoreSources()">Przywróć źródła</button>
+<button onclick="toggleHistory()">Historia: pokaż/ukryj</button>
+</div>
+
+<div class="panel">
+<button onclick="exportData()">Eksport kopii</button>
+<label class="filebtn" for="importFile">Import kopii</label>
+<input id="importFile" type="file" accept=".json,application/json">
+<button onclick="resetView()">Widok bieżący</button>
 </div>
 
 <div id="board">
@@ -50,164 +58,245 @@ small{display:block;padding:0 12px 10px;color:#596579}
 <g id="items"></g>
 </svg>
 </div>
-<div id="status">Zaznaczaj elementy dotknięciem. Możesz wybrać kilka.</div>
-<small>Nowa jednostka ukrywa źródła w historii. Meta-miejsce obejmuje źródła bez ich łączenia w nową jednostkę.</small>
+<div id="status">Gotowe. Zmiany zapisują się automatycznie w tej przeglądarce.</div>
+<div id="history" class="hidden"></div>
 
 <script>
+const NS='http://www.w3.org/2000/svg';
 const svg=document.getElementById('scene');
 const layer=document.getElementById('items');
-const NS='http://www.w3.org/2000/svg';
-let serial=0, selected=new Set(), drag=null;
-let squareCount=0, entityCount=0, metaCount=0;
+const STORE='metacybernetyka_state_v2';
+let objects=[],selected=new Set(),serial=0,historyMode=false,drag=null;
+let squareCount=0,entityCount=0,metaCount=0,relationCount=0;
 
-function node(tag,attrs={}){
+function say(s){document.getElementById('status').textContent=s}
+function make(tag,attrs={}){
  const n=document.createElementNS(NS,tag);
- Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,v));
+ for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);
  return n;
 }
-function say(t){document.getElementById('status').textContent=t}
-function getTransform(g){
- const m=g.transform.baseVal.consolidate();
- return m?{x:m.matrix.e,y:m.matrix.f}:{x:0,y:0};
+function idFor(type){
+ if(type==='square'){squareCount++;return squareCount===1?'0a':squareCount===2?'0b':'0'+squareCount+'a'}
+ if(type==='dot'){relationCount++;return 'r'+relationCount}
+ if(type==='entity'){entityCount++;return entityCount===1?'1a':'1'+String.fromCharCode(96+entityCount)}
+ if(type==='meta'){metaCount++;return metaCount===1?'m0a':'m0'+String.fromCharCode(96+metaCount)}
+ return (type==='circle'?'o':'k')+(++serial);
 }
-function shapeFor(g,type,w=60,h=60){
- if(type==='square'||type==='entity'||type==='meta')
-  return node('rect',{x:-w/2,y:-h/2,width:w,height:h,class:'shape'});
- if(type==='dot')
-  return node('circle',{cx:0,cy:0,r:6,fill:'#26364c'});
- if(type==='circle')
-  return node('circle',{cx:0,cy:0,r:30,class:'shape'});
- return node('line',{x1:-28,y1:0,x2:28,y2:0,stroke:'#26364c','stroke-width':3});
-}
-function add(type,customId=null,x=null,y=null,w=60,h=60,sourceIds=[]){
+function nextPosition(){
  serial++;
- let id=customId;
- if(!id){
-  if(type==='square'){
-   squareCount++;
-   id=squareCount===1?'0a':squareCount===2?'0b':'0'+String.fromCharCode(96+squareCount);
-  }else if(type==='dot')id='r'+serial;
-  else if(type==='circle')id='o'+serial;
-  else id='k'+serial;
+ return {x:55+(serial%3)*95,y:65+(serial%5)*78};
+}
+function add(type,id=null,x=null,y=null,w=null,h=null,sources=[]){
+ const p=nextPosition();
+ const o={
+  id:id||idFor(type),type,
+  x:x===null?p.x:x,y:y===null?p.y:y,
+  w:w||(type==='dot'?16: type==='line'?56:60),
+  h:h||(type==='dot'?16:type==='line'?16:60),
+  sources:[...sources],hidden:false,hiddenBy:null
+ };
+ objects.push(o);render();save();
+ selected.clear();selected.add(o.id);
+ say('Dodano '+o.id+'. Zapisano automatycznie.');
+ return o;
+}
+function draw(o){
+ const g=make('g',{transform:`translate(${o.x} ${o.y})`,class:'item'});
+ g.dataset.id=o.id;
+ const chosen=selected.has(o.id);
+ let s;
+ if(o.type==='square'||o.type==='entity'||o.type==='meta'){
+  s=make('rect',{x:-o.w/2,y:-o.h/2,width:o.w,height:o.h,
+   fill:o.type==='meta'?'none':'white',
+   stroke:o.type==='meta'?'#a05a16':chosen?'#1874d1':'#26364c',
+   'stroke-width':chosen?3:2});
+  if(o.type==='meta')s.setAttribute('stroke-dasharray','6 3');
+ }else if(o.type==='dot'){
+  s=make('circle',{cx:0,cy:0,r:6,fill:chosen?'#1874d1':'#26364c'});
+ }else if(o.type==='circle'){
+  s=make('circle',{cx:0,cy:0,r:30,fill:'none',stroke:chosen?'#1874d1':'#26364c','stroke-width':2});
+ }else{
+  s=make('line',{x1:-28,y1:0,x2:28,y2:0,stroke:chosen?'#1874d1':'#26364c','stroke-width':3});
  }
- x=x===null?65+(serial%3)*80:x;
- y=y===null?65+(serial%5)*75:y;
- const g=node('g',{class:'item',transform:`translate(${x} ${y})`});
- g.dataset.id=id;
- g.dataset.type=type;
- g.dataset.w=w;g.dataset.h=h;
- g.dataset.sources=JSON.stringify(sourceIds);
- g.appendChild(shapeFor(g,type,w,h));
- const label=node('text',{x:0,y:-h/2-9,class:'label','text-anchor':'middle'});
- label.textContent=id;
+ g.appendChild(s);
+ const label=make('text',{x:0,y:-o.h/2-8,class:'label','text-anchor':'middle'});
+ label.textContent=o.id;
  g.appendChild(label);
- g.addEventListener('pointerdown',startDrag);
- layer.appendChild(g);
- say('Dodano '+id+'. Dotknij innych elementów, aby dodać je do zaznaczenia.');
- return g;
-}
-function select(g){
- selected.add(g);
- const s=g.querySelector('.shape');
- if(s)s.setAttribute('stroke','#1874d1');
- say('Zaznaczono: '+[...selected].map(x=>x.dataset.id).join(', '));
-}
-function clearSelection(){
- selected.forEach(g=>{
-  const s=g.querySelector('.shape');
-  if(s)s.setAttribute('stroke','#26364c');
+ if(o.hidden)g.style.display='none';
+ else if(o.hiddenBy&&!historyMode)g.style.display='none';
+ g.addEventListener('pointerdown',e=>startDrag(e,o.id));
+ g.addEventListener('click',e=>{
+  e.stopPropagation();
+  if(!drag)select(o.id);
  });
- selected.clear();
- say('Zaznaczenie wyczyszczone.');
+ layer.appendChild(g);
 }
-function startDrag(e){
+function render(){
+ layer.replaceChildren();
+ objects.forEach(draw);
+ renderHistory();
+}
+function select(id){
+ selected.add(id);
+ render();
+ const ids=[...selected];
+ say('Zaznaczenie: '+ids.join(', '));
+}
+function clearSelection(){selected.clear();render();say('Zaznaczenie wyczyszczone.')}
+function visibleSelected(){
+ return objects.filter(o=>selected.has(o.id)&&!o.hidden);
+}
+function transform(){
+ const src=visibleSelected();
+ if(src.length<2){say('Zaznacz co najmniej dwa widoczne elementy.');return}
+ const id=idFor('entity');
+ const x=src.reduce((a,o)=>a+o.x,0)/src.length;
+ const y=src.reduce((a,o)=>a+o.y,0)/src.length;
+ src.forEach(o=>{o.hidden=true;o.hiddenBy=id});
+ const o={id,type:'entity',x,y,w:64,h:64,sources:src.map(o=>o.id),hidden:false,hiddenBy:null};
+ objects.push(o);selected=new Set([id]);historyMode=false;
+ render();save();
+ say('Utworzono '+id+'. Źródła zachowane w historii: '+o.sources.join(', ')+'.');
+}
+function makeMeta(){
+ const src=visibleSelected();
+ if(!src.length){say('Zaznacz elementy, które ma obejmować meta-miejsce.');return}
+ const id=idFor('meta');
+ const minX=Math.min(...src.map(o=>o.x-o.w/2));
+ const maxX=Math.max(...src.map(o=>o.x+o.w/2));
+ const minY=Math.min(...src.map(o=>o.y-o.h/2));
+ const maxY=Math.max(...src.map(o=>o.y+o.h/2));
+ const w=Math.max(75,maxX-minX+34),h=Math.max(75,maxY-minY+34);
+ const o={id,type:'meta',x:(minX+maxX)/2,y:(minY+maxY)/2,w,h,
+  sources:src.map(o=>o.id),hidden:false,hiddenBy:null};
+ objects.push(o);selected=new Set([id]);render();save();
+ say('Utworzono '+id+'. Źródła pozostają osobnymi elementami: '+o.sources.join(', ')+'.');
+}
+function restoreSources(){
+ const chosen=objects.filter(o=>selected.has(o.id));
+ if(!chosen.length){say('Zaznacz jednostkę lub meta-miejsce.');return}
+ let restored=[];
+ chosen.forEach(o=>{
+  (o.sources||[]).forEach(id=>{
+   const src=objects.find(x=>x.id===id);
+   if(src){src.hidden=false;src.hiddenBy=null;restored.push(id)}
+  });
+ });
+ if(!restored.length){say('Wybrane elementy nie mają zapisanych źródeł.');return}
+ historyMode=true;render();save();
+ say('Przywrócono źródła: '+[...new Set(restored)].join(', ')+'. Jednostki pochodne zachowano.');
+}
+function toggleHistory(){
+ historyMode=!historyMode;
+ render();save();
+ say(historyMode?'Widok historii: pokazano także ukryte elementy.':'Widok bieżący: ukryte źródła pozostają w historii.');
+}
+function resetView(){
+ historyMode=false;
+ selected.clear();render();save();
+ say('Widok bieżący. Dane historyczne pozostają zapisane.');
+}
+function renderHistory(){
+ const panel=document.getElementById('history');
+ panel.classList.toggle('hidden',!historyMode);
+ if(!historyMode){panel.textContent='';return}
+ panel.replaceChildren();
+ const title=document.createElement('strong');
+ title.textContent='Historia struktury';
+ panel.appendChild(title);
+ objects.forEach(o=>{
+  const row=document.createElement('div');
+  row.style.marginTop='7px';
+  row.textContent=o.id+' · '+o.type+
+   (o.sources.length?' ← '+o.sources.join(', '):'')+
+   (o.hidden?' · źródło ukryte':'');
+  panel.appendChild(row);
+ });
+}
+function startDrag(e,id){
  if(e.target.closest('text'))return;
  e.preventDefault();
- const g=e.currentTarget;
- if(!selected.has(g))select(g);
- const p=point(e),pos=getTransform(g);
- drag={g,dx:p.x-pos.x,dy:p.y-pos.y};
- g.setPointerCapture(e.pointerId);
+ e.stopPropagation();
+ if(!selected.has(id))selected=new Set([id]);
+ const p=point(e),o=objects.find(x=>x.id===id);
+ drag={id,dx:p.x-o.x,dy:p.y-o.y,pointer:e.pointerId};
+ svg.setPointerCapture(e.pointerId);
+ render();
 }
 function point(e){
- const p=svg.createSVGPoint();
- p.x=e.clientX;p.y=e.clientY;
+ const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;
  return p.matrixTransform(svg.getScreenCTM().inverse());
 }
 svg.addEventListener('pointermove',e=>{
  if(!drag)return;
- const p=point(e);
- drag.g.setAttribute('transform',`translate(${p.x-drag.dx} ${p.y-drag.dy})`);
+ const p=point(e),o=objects.find(x=>x.id===drag.id);
+ if(!o)return;
+ o.x=p.x-drag.dx;o.y=p.y-drag.dy;
+ const g=[...layer.children].find(n=>n.dataset.id===o.id);
+ if(g)g.setAttribute('transform',`translate(${o.x} ${o.y})`);
 });
-function stopDrag(){drag=null}
-svg.addEventListener('pointerup',stopDrag);
-svg.addEventListener('pointercancel',stopDrag);
-
-function sources(){
- return [...selected].filter(g=>g.style.display!=='none');
+function endDrag(){
+ if(!drag)return;
+ drag=null;save();render();
 }
-function transform(){
- const src=sources();
- if(src.length<2){say('Zaznacz co najmniej dwa elementy, aby utworzyć nową jednostkę.');return}
- entityCount++;
- const id=entityCount===1?'1a':'1'+String.fromCharCode(96+entityCount);
- const positions=src.map(getTransform);
- const x=positions.reduce((a,p)=>a+p.x,0)/positions.length;
- const y=positions.reduce((a,p)=>a+p.y,0)/positions.length;
- const ids=src.map(g=>g.dataset.id);
- src.forEach(g=>{g.style.display='none';g.dataset.hiddenBy=id;});
- clearSelection();
- const n=add('entity',id,x,y,58,58,ids);
- select(n);
- say('Utworzono '+id+'. Źródła zachowane w ukrytej historii: '+ids.join(', ')+'.');
+svg.addEventListener('pointerup',endDrag);
+svg.addEventListener('pointercancel',endDrag);
+svg.addEventListener('click',e=>{
+ if(e.target===svg||e.target===layer)clearSelection();
+});
+function save(){
+ try{
+  localStorage.setItem(STORE,JSON.stringify({
+   objects,serial,squareCount,entityCount,metaCount,relationCount,historyMode
+  }));
+  saySave();
+ }catch(e){say('Nie udało się zapisać lokalnie. Wyeksportuj kopię JSON.')}
 }
-function makeMeta(){
- const src=sources();
- if(src.length<1){say('Najpierw zaznacz elementy, które ma obejmować meta-miejsce.');return}
- metaCount++;
- const id=metaCount===1?'m0a':'m0'+String.fromCharCode(96+metaCount);
- const pos=src.map(g=>{
-  const p=getTransform(g);
-  return {x:p.x,y:p.y,w:Number(g.dataset.w)||60,h:Number(g.dataset.h)||60};
- });
- const minX=Math.min(...pos.map(p=>p.x-p.w/2));
- const maxX=Math.max(...pos.map(p=>p.x+p.w/2));
- const minY=Math.min(...pos.map(p=>p.y-p.h/2));
- const maxY=Math.max(...pos.map(p=>p.y+p.h/2));
- const pad=20,x=(minX+maxX)/2,y=(minY+maxY)/2;
- const w=Math.max(70,maxX-minX+pad*2);
- const h=Math.max(70,maxY-minY+pad*2);
- const ids=src.map(g=>g.dataset.id);
- const g=add('meta',id,x,y,w,h,ids);
- g.querySelector('.shape').setAttribute('fill','none');
- g.querySelector('.shape').setAttribute('stroke-dasharray','6 3');
- g.querySelector('.shape').setAttribute('stroke','#a05a16');
- g.querySelector('.label').setAttribute('y',-h/2-8);
- clearSelection();select(g);
- say('Utworzono '+id+'. Elementy wewnątrz pozostają osobnymi elementami: '+ids.join(', ')+'.');
+function saySave(){
+ const el=document.getElementById('status');
+ if(!el.textContent.includes('Nie udało się zapisać'))el.dataset.saved='1';
 }
-function showAll(){
- [...layer.children].forEach(g=>g.style.display='');
- say('Pokazano wszystkie elementy, także źródła ukryte w historii.');
+function load(){
+ try{
+  const raw=localStorage.getItem(STORE);
+  if(!raw)return false;
+  const d=JSON.parse(raw);
+  if(!Array.isArray(d.objects))return false;
+  objects=d.objects;serial=d.serial||0;squareCount=d.squareCount||0;
+  entityCount=d.entityCount||0;metaCount=d.metaCount||0;
+  relationCount=d.relationCount||0;historyMode=!!d.historyMode;
+  return true;
+ }catch(e){return false}
 }
 function exportData(){
- const data=[...layer.children].map(g=>{
-  const p=getTransform(g);
-  return {
-   id:g.dataset.id,type:g.dataset.type,x:p.x,y:p.y,
-   width:Number(g.dataset.w),height:Number(g.dataset.h),
-   sources:JSON.parse(g.dataset.sources||'[]'),
-   hidden:g.style.display==='none',
-   hiddenBy:g.dataset.hiddenBy||null
-  };
- });
+ const data={version:2,objects,serial,squareCount,entityCount,metaCount,relationCount,historyMode};
  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
- const url=URL.createObjectURL(blob);
- const a=document.createElement('a');
- a.href=url;a.download='metacybernetyka.json';a.click();
- URL.revokeObjectURL(url);
- say('Przygotowano eksport JSON.');
+ const url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download='metacybernetyka-kopia.json';a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+ say('Wyeksportowano kopię zapasową JSON.');
 }
+document.getElementById('importFile').addEventListener('change',async e=>{
+ const file=e.target.files[0];if(!file)return;
+ try{
+  const d=JSON.parse(await file.text());
+  if(!Array.isArray(d.objects))throw Error('Nieprawidłowy plik');
+  objects=d.objects;serial=d.serial||0;squareCount=d.squareCount||0;
+  entityCount=d.entityCount||0;metaCount=d.metaCount||0;
+  relationCount=d.relationCount||0;historyMode=!!d.historyMode;
+  selected.clear();render();save();
+  say('Wczytano kopię zapasową.');
+ }catch(err){say('Nie udało się wczytać pliku JSON.')}
+ e.target.value='';
+});
+if(!load()){
+ objects=[];selected.clear();
+ add('square','0a',105,150,120,120);
+ add('square','0b',105,150,55,55);
+ selected.clear();
+}
+render();
+say('Dane zapisują się automatycznie w pamięci tej przeglądarki.');
 </script>
 </body>
 </html>
