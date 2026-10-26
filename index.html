@@ -1,302 +1,87 @@
-
-<!DOCTYPE html>
-<html lang="pl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Metacybernetyka</title>
-<style>
-*{box-sizing:border-box}
-body{margin:0;font-family:Arial,sans-serif;background:#f2f4f7;color:#202b3c}
-header{background:#202b3c;color:white;padding:15px}
-h2{margin:0;font-size:22px}
-header p{font-size:14px;margin-bottom:0}
-.panel{display:flex;flex-wrap:wrap;gap:7px;padding:9px}
-button,.filebtn{border:1px solid #bdc6d2;background:white;border-radius:9px;padding:11px;font-size:14px;color:#202b3c}
-.action{background:#e4ecff}
-button:active{background:#d4e2fc}
-#board{margin:0 8px;border:1px solid #cbd3de;border-radius:10px;background:white;overflow:hidden}
-svg{display:block;width:100%;height:53vh;min-height:320px;touch-action:none}
-.label{font-size:14px;fill:#202b3c;pointer-events:none}
-.item{touch-action:none}
-#status{padding:10px;font-size:13px;min-height:38px}
-#history{padding:10px;margin:0 8px 10px;background:white;border:1px solid #d2d8e1;border-radius:9px;font-size:13px}
-.hidden{display:none!important}
-input[type=file]{display:none}
-</style>
-</head>
-<body>
-<header>
-<h2>Metacybernetyka</h2>
-<p>Automatyczny zapis · historia · przywracanie źródeł</p>
-</header>
-
-<div class="panel">
-<button onclick="add('square')">＋ Kwadrat</button>
-<button onclick="add('dot')">＋ Punkt r</button>
-<button onclick="add('circle')">＋ Okrąg</button>
-<button onclick="add('line')">＋ Linia</button>
-<button onclick="clearSelection()">Odznacz</button>
-</div>
-
-<div class="panel">
-<button class="action" onclick="transform()">0a + 0b = 1a</button>
-<button class="action" onclick="makeMeta()">Utwórz m0a</button>
+from pathlib import Path
+p=Path('/mnt/data/Wklejony tekst.txt')
+s=p.read_text()
+s=s.replace('<button onclick="restoreSources()">Przywróć źródła</button>\n<button onclick="toggleHistory()">Historia: pokaż/ukryj</button>',
+'''<button onclick="toggleStructure()">Ujawnij / ukryj strukturę</button>
 <button onclick="restoreSources()">Przywróć źródła</button>
-<button onclick="toggleHistory()">Historia: pokaż/ukryj</button>
-</div>
-
-<div class="panel">
-<button onclick="exportData()">Eksport kopii</button>
-<label class="filebtn" for="importFile">Import kopii</label>
-<input id="importFile" type="file" accept=".json,application/json">
-<button onclick="resetView()">Widok bieżący</button>
-</div>
-
-<div id="board">
-<svg id="scene" viewBox="0 0 360 500">
-<g id="items"></g>
-</svg>
-</div>
-<div id="status">Gotowe. Zmiany zapisują się automatycznie w tej przeglądarce.</div>
-<div id="history" class="hidden"></div>
-
-<script>
-const NS='http://www.w3.org/2000/svg';
-const svg=document.getElementById('scene');
-const layer=document.getElementById('items');
-const STORE='metacybernetyka_state_v2';
-let objects=[],selected=new Set(),serial=0,historyMode=false,drag=null;
-let squareCount=0,entityCount=0,metaCount=0,relationCount=0;
-
-function say(s){document.getElementById('status').textContent=s}
-function make(tag,attrs={}){
- const n=document.createElementNS(NS,tag);
- for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);
- return n;
-}
-function idFor(type){
- if(type==='square'){squareCount++;return squareCount===1?'0a':squareCount===2?'0b':'0'+squareCount+'a'}
- if(type==='dot'){relationCount++;return 'r'+relationCount}
- if(type==='entity'){entityCount++;return entityCount===1?'1a':'1'+String.fromCharCode(96+entityCount)}
- if(type==='meta'){metaCount++;return metaCount===1?'m0a':'m0'+String.fromCharCode(96+metaCount)}
- return (type==='circle'?'o':'k')+(++serial);
-}
-function nextPosition(){
- serial++;
- return {x:55+(serial%3)*95,y:65+(serial%5)*78};
-}
-function add(type,id=null,x=null,y=null,w=null,h=null,sources=[]){
- const p=nextPosition();
- const o={
-  id:id||idFor(type),type,
-  x:x===null?p.x:x,y:y===null?p.y:y,
-  w:w||(type==='dot'?16: type==='line'?56:60),
-  h:h||(type==='dot'?16:type==='line'?16:60),
-  sources:[...sources],hidden:false,hiddenBy:null
- };
- objects.push(o);render();save();
- selected.clear();selected.add(o.id);
- say('Dodano '+o.id+'. Zapisano automatycznie.');
- return o;
-}
-function draw(o){
- const g=make('g',{transform:`translate(${o.x} ${o.y})`,class:'item'});
- g.dataset.id=o.id;
- const chosen=selected.has(o.id);
- let s;
- if(o.type==='square'||o.type==='entity'||o.type==='meta'){
-  s=make('rect',{x:-o.w/2,y:-o.h/2,width:o.w,height:o.h,
-   fill:o.type==='meta'?'none':'white',
-   stroke:o.type==='meta'?'#a05a16':chosen?'#1874d1':'#26364c',
-   'stroke-width':chosen?3:2});
-  if(o.type==='meta')s.setAttribute('stroke-dasharray','6 3');
- }else if(o.type==='dot'){
-  s=make('circle',{cx:0,cy:0,r:6,fill:chosen?'#1874d1':'#26364c'});
- }else if(o.type==='circle'){
-  s=make('circle',{cx:0,cy:0,r:30,fill:'none',stroke:chosen?'#1874d1':'#26364c','stroke-width':2});
- }else{
-  s=make('line',{x1:-28,y1:0,x2:28,y2:0,stroke:chosen?'#1874d1':'#26364c','stroke-width':3});
- }
- g.appendChild(s);
- const label=make('text',{x:0,y:-o.h/2-8,class:'label','text-anchor':'middle'});
- label.textContent=o.id;
- g.appendChild(label);
- if(o.hidden)g.style.display='none';
- else if(o.hiddenBy&&!historyMode)g.style.display='none';
- g.addEventListener('pointerdown',e=>startDrag(e,o.id));
- g.addEventListener('click',e=>{
-  e.stopPropagation();
-  if(!drag)select(o.id);
- });
- layer.appendChild(g);
-}
-function render(){
- layer.replaceChildren();
- objects.forEach(draw);
- renderHistory();
-}
-function select(id){
- selected.add(id);
- render();
- const ids=[...selected];
- say('Zaznaczenie: '+ids.join(', '));
-}
-function clearSelection(){selected.clear();render();say('Zaznaczenie wyczyszczone.')}
-function visibleSelected(){
- return objects.filter(o=>selected.has(o.id)&&!o.hidden);
-}
-function transform(){
- const src=visibleSelected();
- if(src.length<2){say('Zaznacz co najmniej dwa widoczne elementy.');return}
- const id=idFor('entity');
- const x=src.reduce((a,o)=>a+o.x,0)/src.length;
- const y=src.reduce((a,o)=>a+o.y,0)/src.length;
- src.forEach(o=>{o.hidden=true;o.hiddenBy=id});
- const o={id,type:'entity',x,y,w:64,h:64,sources:src.map(o=>o.id),hidden:false,hiddenBy:null};
- objects.push(o);selected=new Set([id]);historyMode=false;
- render();save();
- say('Utworzono '+id+'. Źródła zachowane w historii: '+o.sources.join(', ')+'.');
-}
-function makeMeta(){
- const src=visibleSelected();
- if(!src.length){say('Zaznacz elementy, które ma obejmować meta-miejsce.');return}
- const id=idFor('meta');
- const minX=Math.min(...src.map(o=>o.x-o.w/2));
- const maxX=Math.max(...src.map(o=>o.x+o.w/2));
- const minY=Math.min(...src.map(o=>o.y-o.h/2));
- const maxY=Math.max(...src.map(o=>o.y+o.h/2));
- const w=Math.max(75,maxX-minX+34),h=Math.max(75,maxY-minY+34);
- const o={id,type:'meta',x:(minX+maxX)/2,y:(minY+maxY)/2,w,h,
-  sources:src.map(o=>o.id),hidden:false,hiddenBy:null};
- objects.push(o);selected=new Set([id]);render();save();
- say('Utworzono '+id+'. Źródła pozostają osobnymi elementami: '+o.sources.join(', ')+'.');
-}
-function restoreSources(){
+<button onclick="toggleHistory()">Historia: pokaż/ukryj</button>''')
+# Exact source has two spaces indentation, replacement may fail; do more general
+if 'toggleStructure()' not in s:
+    s=s.replace('  <button onclick="restoreSources()">Przywróć źródła</button>',
+                '  <button onclick="toggleStructure()">Ujawnij / ukryj strukturę</button>\n  <button onclick="restoreSources()">Przywróć źródła</button>')
+# Add reveal style after selected
+s=s.replace("  const chosen=selected.has(o.id);\n  let s;",
+'''  const chosen=selected.has(o.id);
+  const revealedBy=objects.some(parent=>
+   parent.structureVisible && (parent.sources||[]).includes(o.id));
+  let s;''')
+s=s.replace("  if(o.hidden)g.style.display='none';\n  else if(o.hiddenBy&&!historyMode)g.style.display='none';",
+'''  if((o.hidden || o.hiddenBy) && !historyMode && !revealedBy)g.style.display='none';
+  if(revealedBy){
+   g.style.opacity='0.78';
+   g.querySelector('rect, circle, line')?.setAttribute('stroke-dasharray','5 4');
+  }''')
+# insert function before restoreSources
+needle='function restoreSources(){'
+if needle not in s:
+    needle='function restoreSources(){'
+insert='''function toggleStructure(){
  const chosen=objects.filter(o=>selected.has(o.id));
- if(!chosen.length){say('Zaznacz jednostkę lub meta-miejsce.');return}
- let restored=[];
- chosen.forEach(o=>{
-  (o.sources||[]).forEach(id=>{
-   const src=objects.find(x=>x.id===id);
-   if(src){src.hidden=false;src.hiddenBy=null;restored.push(id)}
-  });
- });
- if(!restored.length){say('Wybrane elementy nie mają zapisanych źródeł.');return}
- historyMode=true;render();save();
- say('Przywrócono źródła: '+[...new Set(restored)].join(', ')+'. Jednostki pochodne zachowano.');
-}
-function toggleHistory(){
- historyMode=!historyMode;
+ const parents=chosen.filter(o=>(o.type==='entity'||o.type==='meta')&&(o.sources||[]).length);
+ if(!parents.length){
+  say('Zaznacz byt lub meta-miejsce, które ma zapisaną strukturę źródłową.');
+  return;
+ }
+ const show=parents.some(o=>!o.structureVisible);
+ parents.forEach(o=>{o.structureVisible=show});
  render();save();
- say(historyMode?'Widok historii: pokazano także ukryte elementy.':'Widok bieżący: ukryte źródła pozostają w historii.');
+ say(show
+  ?'Ujawniono strukturę. Źródła są widoczne jako składniki; byt pozostaje zachowany.'
+  :'Ukryto strukturę. Składniki pozostają zapisane; byt pozostaje zachowany.');
 }
-function resetView(){
- historyMode=false;
- selected.clear();render();save();
- say('Widok bieżący. Dane historyczne pozostają zapisane.');
+'''
+s=s.replace(needle,insert+needle)
+# Update header description
+s=s.replace('Automatyczny zapis · historia · przywracanie źródeł',
+            'Automatyczny zapis · ujawnianie struktury · historia')
+# create final file
+out=Path('/mnt/data/metacybernetyka-ujawnianie-struktury.html')
+out.write_text(s)
+print("toggle button", 'onclick="toggleStructure()"' in s, "function", 'function toggleStructure()' in s, "length", len(s), "lines", len(s.splitlines()))
+
+bash -lc python - <<'PY'
+from pathlib import Path
+p=Path('/mnt/data/Wklejony tekst.txt')
+s=p.read_text()
+s=s.replace('  <button onclick="restoreSources()">Przywróć źródła</button>', '  <button onclick="toggleStructure()">Ujawnij / ukryj strukturę</button>\n  <button onclick="restoreSources()">Przywróć źródła</button>')
+s=s.replace('Automatyczny zapis · historia · przywracanie źródeł', 'Automatyczny zapis · ujawnianie struktury · historia')
+s=s.replace('  const chosen=selected.has(o.id);\n  let s;', '''  const chosen=selected.has(o.id);
+  const revealedBy=objects.some(parent=>
+   parent.structureVisible && (parent.sources||[]).includes(o.id));
+  let s;''')
+s=s.replace("  if(o.hidden)g.style.display='none';\n  else if(o.hiddenBy&&!historyMode)g.style.display='none';", """  if((o.hidden || o.hiddenBy) && !historyMode && !revealedBy)g.style.display='none';
+  if(revealedBy){
+   g.style.opacity='0.78';
+   g.querySelector('rect, circle, line')?.setAttribute('stroke-dasharray','5 4');
+  }""")
+needle='function restoreSources(){'
+insert='''function toggleStructure(){
+ const chosen=objects.filter(o=>selected.has(o.id));
+ const parents=chosen.filter(o=>(o.type==='entity'||o.type==='meta')&&(o.sources||[]).length);
+ if(!parents.length){
+  say('Zaznacz byt lub meta-miejsce, które ma zapisaną strukturę źródłową.');
+  return;
+ }
+ const show=parents.some(o=>!o.structureVisible);
+ parents.forEach(o=>{o.structureVisible=show});
+ render();save();
+ say(show
+  ?'Ujawniono strukturę. Źródła są widoczne jako składniki; byt pozostaje zachowany.'
+  :'Ukryto strukturę. Składniki pozostają zapisane; byt pozostaje zachowany.');
 }
-function renderHistory(){
- const panel=document.getElementById('history');
- panel.classList.toggle('hidden',!historyMode);
- if(!historyMode){panel.textContent='';return}
- panel.replaceChildren();
- const title=document.createElement('strong');
- title.textContent='Historia struktury';
- panel.appendChild(title);
- objects.forEach(o=>{
-  const row=document.createElement('div');
-  row.style.marginTop='7px';
-  row.textContent=o.id+' · '+o.type+
-   (o.sources.length?' ← '+o.sources.join(', '):'')+
-   (o.hidden?' · źródło ukryte':'');
-  panel.appendChild(row);
- });
-}
-function startDrag(e,id){
- if(e.target.closest('text'))return;
- e.preventDefault();
- e.stopPropagation();
- if(!selected.has(id))selected=new Set([id]);
- const p=point(e),o=objects.find(x=>x.id===id);
- drag={id,dx:p.x-o.x,dy:p.y-o.y,pointer:e.pointerId};
- svg.setPointerCapture(e.pointerId);
- render();
-}
-function point(e){
- const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;
- return p.matrixTransform(svg.getScreenCTM().inverse());
-}
-svg.addEventListener('pointermove',e=>{
- if(!drag)return;
- const p=point(e),o=objects.find(x=>x.id===drag.id);
- if(!o)return;
- o.x=p.x-drag.dx;o.y=p.y-drag.dy;
- const g=[...layer.children].find(n=>n.dataset.id===o.id);
- if(g)g.setAttribute('transform',`translate(${o.x} ${o.y})`);
-});
-function endDrag(){
- if(!drag)return;
- drag=null;save();render();
-}
-svg.addEventListener('pointerup',endDrag);
-svg.addEventListener('pointercancel',endDrag);
-svg.addEventListener('click',e=>{
- if(e.target===svg||e.target===layer)clearSelection();
-});
-function save(){
- try{
-  localStorage.setItem(STORE,JSON.stringify({
-   objects,serial,squareCount,entityCount,metaCount,relationCount,historyMode
-  }));
-  saySave();
- }catch(e){say('Nie udało się zapisać lokalnie. Wyeksportuj kopię JSON.')}
-}
-function saySave(){
- const el=document.getElementById('status');
- if(!el.textContent.includes('Nie udało się zapisać'))el.dataset.saved='1';
-}
-function load(){
- try{
-  const raw=localStorage.getItem(STORE);
-  if(!raw)return false;
-  const d=JSON.parse(raw);
-  if(!Array.isArray(d.objects))return false;
-  objects=d.objects;serial=d.serial||0;squareCount=d.squareCount||0;
-  entityCount=d.entityCount||0;metaCount=d.metaCount||0;
-  relationCount=d.relationCount||0;historyMode=!!d.historyMode;
-  return true;
- }catch(e){return false}
-}
-function exportData(){
- const data={version:2,objects,serial,squareCount,entityCount,metaCount,relationCount,historyMode};
- const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
- const url=URL.createObjectURL(blob),a=document.createElement('a');
- a.href=url;a.download='metacybernetyka-kopia.json';a.click();
- setTimeout(()=>URL.revokeObjectURL(url),1000);
- say('Wyeksportowano kopię zapasową JSON.');
-}
-document.getElementById('importFile').addEventListener('change',async e=>{
- const file=e.target.files[0];if(!file)return;
- try{
-  const d=JSON.parse(await file.text());
-  if(!Array.isArray(d.objects))throw Error('Nieprawidłowy plik');
-  objects=d.objects;serial=d.serial||0;squareCount=d.squareCount||0;
-  entityCount=d.entityCount||0;metaCount=d.metaCount||0;
-  relationCount=d.relationCount||0;historyMode=!!d.historyMode;
-  selected.clear();render();save();
-  say('Wczytano kopię zapasową.');
- }catch(err){say('Nie udało się wczytać pliku JSON.')}
- e.target.value='';
-});
-if(!load()){
- objects=[];selected.clear();
- add('square','0a',105,150,120,120);
- add('square','0b',105,150,55,55);
- selected.clear();
-}
-render();
-say('Dane zapisują się automatycznie w pamięci tej przeglądarki.');
-</script>
-</body>
-</html>
+'''
+s=s.replace(needle,insert+needle)
+out=Path('/mnt/data/metacybernetyka-ujawnianie-struktury.html')
+out.write_text(s)
+print('button:', 'onclick="toggleStructure()"' in s, 'function:', 'function toggleStructure()' in s, 'lines:', len(s.splitlines()))
+PY
